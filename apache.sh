@@ -1,17 +1,19 @@
- #/usr/local/bin/bash
+#/usr/local/bin/bash
 
-www=`jls | grep www01 | awk '{ print $1 }'`
-repo=`jls | grep repo01 | awk '{ print $1 }'`
+www_hostname="www01"
+repo_hostname="repo01"
+
+www_jid=`jls | grep ${www_hostname} | awk '{ print $1 }'`
+repo_jid=`jls | grep ${repo_hostname} | awk '{ print $1 }'`
 
 
-while getopts "ahsn:d:" optname; do
+while getopts "bvn:d:" optname; do
     case "$optname" in
-        a ) apache=1 ;;
-        s ) site=1 ;;
+        v ) vhost=1 ;;
+        b ) blog=1 ;;
         n ) nuser=$OPTARG ;;
         d ) domain=$OPTARG ;;
-        ? ) echo "-- Unknown option $OPTARG --" ;;
-        h )
+        ? ) echo "-- Unknown option $OPTARG --"
         ;;
     esac
 done
@@ -19,74 +21,101 @@ done
 
 shift $(( OPTIND - 1 ))
 
-
 show_help() {
             echo; echo
-            echo "      -h  help"
-            echo "      -n  REQUIRED: new username"
-            echo "      -d  REQUIRED: domain for the new site (example.com)" 
-            echo "      -a  OVERWRITE apache configs, create new user and site"  
-            echo "      -s  create new site (must specify -n and -u)"
+            echo "      +--- required flags ---------+"
+            echo "      | -n  new username           |"
+            echo "      | -d  domain name for vhosts |" 
+            echo "      +----------------------------+"
+            echo
+            echo "      +--- functionality ----|---- creates ----------------------------+-"
+            echo "      | -v  create new vhost |   www01: user/directory/vhost           |"
+            echo "      +----------------------+-----------------------------------------+"
+            echo "      | -b  create new blog  |   www01: -user/directory/vhost/ssh keys |"
+            echo "      |                      |   repo01: user/ro-user/git/ssh keys     |"
+            echo "      +----------------------+-----------------------------------------+" 
             echo; echo
 }
 
-create_site() {
+create_user() {
 
-    echo "###    Creating user ${nuser}:${nuser} and ssh keys    ###"
-    echo "##########################################################"
+        ### usertype
+          # 0 = "vhost"     - create user/dirs on www01 for the <Processor> directive
+          # 1 = "blog"      - create user/user-ro/dirs/ssh-keys on repo01 for git,
+          #                     - create ssh keys for www01 and repo01
+
+        utype=$1
+
+        echo "###    Creating user ${nuser}:${nuser}    ###"
+        echo "#############################################"
+        echo; echo
+
+        if [ "${utype}" -eq "0" ]; then
+
+            jexec ${www_jid} pw groupadd ${nuser}
+            jexec ${www_jid} pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 700 -s /sbin/nologin
+
+        elif [ "${utype}" -eq "1" ]; then
+
+            jexec ${repo_jid} pw groupadd ${nuser}
+            jexec ${repo_jid} pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 770 -s /usr/local/bin/git-shell
+
+            for i in ${www_jid} ${repo_jid}; do
+                jexec $i mkdir /home/${nuser}/.ssh
+                jexec $i mkdir /home/${nuser}/${domain}/
+                jexec $i ssh-keygen -t rsa -b 4096 -f /home/${nuser}/.ssh/id_rsa -N "" > /dev/null
+                jexec $i chown -R ${nuser}:${nuser} /home/${nuser}/
+            done;
+
+            ### Create a read-only account on ${repo_hostname} for <user>@${www_hostname} to use for git-over-ssh.
+            jexec ${repo_jid} pw useradd -n ${nuser}-ro -d /home/${nuser} -g ${nuser} -s /usr/local/bin/git-shell
+                
+            ### Create .ssh/config for www01
+            echo Host ${repo_hostname} > /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/config
+            echo "    Hostname 10.0.0.3" >> /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/config
+            echo "    Port 22003" >> /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/config
+            echo "    User ${nuser}-ro" >> /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/config
+            echo "    IdentityFile /home/${nuser}/.ssh/id_rsa" >> /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/config
+            echo "    StrictHostKeyChecking no" >> /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/config
+
+            ### Copy public key for <user>-ro to repo01
+            cat /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/id_rsa.pub \
+                >> /usr/jails/${repo_hostname}/usr/home/${nuser}/.ssh/authorized_keys
+
+            ### Let read-only user read .ssh/authorized_keys
+              # For some reason the files/dirs are unreadable at 640.. :-/
+            jexec ${repo_jid} chmod 770 /home/${nuser}
+            jexec ${repo_jid} chmod 770 /home/${nuser}/.ssh
+            jexec ${repo_jid} chown ${nuser}:${nuser} /home/${nuser}/.ssh/authorized_keys
+            jexec ${repo_jid} chmod 770 /home/${nuser}/.ssh/authorized_keys
+            jexec ${www_jid} chmod -R 700 /home/${nuser}/.ssh
+
+            jexec ${repo_jid} chmod 770 /home/${nuser}/.ssh
+        fi
+
+
+}
+create_vhost() {
+
+    if ! [ -d "/usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts" ]; then
+        install_configs
+    fi
+
+    echo "###   Creating wwww01:/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf   ###"
+    echo "#####################################################################################"
     echo; echo
 
-    ### Create users for each jail
-    for i in ${www} ${repo}; do
-        jexec $i pw groupadd ${nuser}
-        jexec $i pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 700 -s /sbin/nologin
+    mkdir -p /usr/jails/${www_hostname}/home/${nuser}/${domain}/_site
+    echo "" > /usr/jails/${www_hostname}/home/${nuser}/${domain}/_site/index.html
+    jexec ${www_jid} chmod -R 755 /home/${nuser}/${domain}
 
-        jexec $i mkdir /home/${nuser}/.ssh
-        jexec $i mkdir /home/${nuser}/${domain}/
-        jexec $i ssh-keygen -t rsa -b 4096 -f /home/${nuser}/.ssh/id_rsa -N "" > /dev/null
-        jexec $i chown -R ${nuser}:${nuser} /home/${nuser}/
-        jexec $i chmod -R 700 /home/${nuser}/.ssh
+    cp /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/blank.vhost \
+        /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf
 
-    done
-
-    ### Create a read-only account on repo01 for <user>@www01 to use for git-over-ssh.
-    jexec ${repo} pw useradd -n ${nuser}-ro -d /home/${nuser} -g ${nuser} -s /usr/local/bin/git-shell
-
-
-    ### Create .ssh/config for www01
-    echo Host repo01 > /usr/jails/www01/usr/home/${nuser}/.ssh/config
-    echo "    Hostname 10.0.0.3" >> /usr/jails/www01/usr/home/${nuser}/.ssh/config
-    echo "    Port 22003" >> /usr/jails/www01/usr/home/${nuser}/.ssh/config
-    echo "    User ${nuser}-ro" >> /usr/jails/www01/usr/home/${nuser}/.ssh/config
-    echo "    IdentityFile /home/${nuser}/.ssh/id_rsa" >> /usr/jails/www01/usr/home/${nuser}/.ssh/config
-    echo "    StrictHostKeyChecking no" >> /usr/jails/www01/usr/home/${nuser}/.ssh/config
-
-    jexec ${www} chown ${nuser}:${nuser} /home/${nuser}/.ssh/config
-    jexec ${www} chmod 600 /home/${nuser}/.ssh/config
-
-    ### Copy public key for <user>-ro to repo01
-    cat /usr/jails/www01/usr/home/${nuser}/.ssh/id_rsa.pub \
-        >> /usr/jails/repo01/usr/home/${nuser}/.ssh/authorized_keys
-
-    ### Let read-only user read .ssh/authorized_keys
-    jexec ${repo} chmod 770 /home/${nuser}
-    jexec ${repo} chmod 770 /home/${nuser}/.ssh
-    jexec ${repo} chown ${nuser}:${nuser} /home/${nuser}/.ssh/authorized_keys
-    jexec ${repo} chmod 770 /home/${nuser}/.ssh/authorized_keys
-
-    ### Set appropriate shells
-    jexec ${repo} pw usermod ${nuser} -s /usr/local/bin/git-shell
-    jexec ${repo} pw usermod ${nuser}-ro -s /usr/local/bin/git-shell
-
-
-
-    cp /usr/jails/www01/usr/local/etc/apache22/extra/vhosts/blank.vhost \
-        /usr/jails/www01/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf
-
-    jexec ${www} sed -i "" "s/__USER__/${nuser}/g" \
+    jexec ${www_jid} sed -i "" "s/__USER__/${nuser}/g" \
          /usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf
 
-    jexec ${www} sed -i "" "s/__URL__/${domain}/g" \
+    jexec ${www_jid} sed -i "" "s/__URL__/${domain}/g" \
          /usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf 
 
 }
@@ -97,50 +126,59 @@ install_configs() {
     echo "##########################################################"
     echo; echo
 
-    jexec ${www} fetch -o /tmp/apache-configs.tar.gz http://10.0.0.2/files/apache-configs.tar.gz 
-    jexec ${www} tar xvzf /tmp/apache-configs.tar.gz -C /usr/local/etc/apache22
+    jexec ${www_jid} fetch -o /tmp/apache-configs.tar.gz http://10.0.0.2/files/apache-configs.tar.gz 
+    jexec ${www_jid} tar xvzf /tmp/apache-configs.tar.gz -C /usr/local/etc/apache22
     
-    jexec ${www} sed -i "" "s/__USER__/${nuser}/g" \
+    jexec ${www_jid} sed -i "" "s/__USER__/${nuser}/g" \
          /usr/local/etc/apache22/httpd.conf
 
-    jexec ${www} sed -i "" "s/__URL__/${domain}/g" \
+    jexec ${www_jid} sed -i "" "s/__URL__/${domain}/g" \
          /usr/local/etc/apache22/httpd.conf
-
     
+    echo; echo
     echo "###    Modifying sshd_config on repo01    ###"
     echo "#############################################"
     echo; echo
 
+    echo "sshd_enable=\"YES\"" >  /usr/jails/${repo_hostname}/etc/rc.conf
+    echo "apache22_enable=\"YES\"" >  /usr/jails/${www_hostname}/etc/rc.conf
+
     ### Just adding 'StrictModes no' so that the read-only users have read permissions
       # to real users .ssh/authorized_keys files
+    sed -i "" 's/^#StrictModes yes/StrictModes no/' /usr/jails/${repo_hostname}/etc/ssh/sshd_config
+
+    jexec ${repo_jid} /etc/rc.d/sshd restart > /dev/null
+    jexec ${www_jid} /usr/local/etc/rc.d/apache22 reload
+
+    echo "10.0.0.3          ${repo_hostname}" > /usr/jails/${www_hostname}/etc/hosts
 }
 
-initialize_git() {
+create_blog() {
 
     echo; echo
-    echo "###    Initializing git repository    ###"
-    echo "#########################################"
+    echo "###    Creating blog repository    ###"
+    echo "######################################"
     echo; echo
 
-#    echo "10.0.0.3          repo01" >> /usr/jails/www01/etc/hosts
 
-    jexec ${repo} git init --shared=0640 /home/${nuser}/${domain} 
-    jexec ${repo} chown -R ${nuser}:${nuser} /home/${nuser}/${domain}
+    jexec ${repo_jid} git init --shared=0640 /home/${nuser}/${domain} 
+    jexec ${repo_jid} chown -R ${nuser}:${nuser} /home/${nuser}/${domain}
 
-    jexec ${www} pw usermod ${nuser} -s /bin/sh
-    jexec ${www} su ${nuser} -c "cd && git clone repo01:/home/${nuser}/${domain}"
+    jexec ${www_jid} pw usermod ${nuser} -s /bin/sh
+    jexec ${www_jid} su ${nuser} -c "cd && git clone ${repo_hostname}:/home/${nuser}/${domain}"
+    jexec ${www_jid} pw usermod ${nuser} -s /sbin/nologin
 
     ### Script will be run from a cronjob, probably will add more stuffs later.
     ### Its in its own shell script because im too dumb to make cron work the right way
     ### "* * * * * su -s /bin/sh ${nuser} -c 'cd /path/git/ && git pull'
     ### ^^^^^ wouldnt work, didnt care to research why
      
-    echo "#!/bin/sh" > /usr/jails/www01/home/${nuser}/update.sh
-    echo "cd /home/${nuser}/${domain}" >> /usr/jails/www01/home/${nuser}/update.sh
-    echo "git pull" >> /usr/jails/www01/home/${nuser}/update.sh
+    echo "#!/bin/sh" > /usr/jails/${www_hostname}/home/${nuser}/update.sh
+    echo "cd /home/${nuser}/${domain}" >> /usr/jails/${www_hostname}/home/${nuser}/update.sh
+    echo "git pull" >> /usr/jails/${www_hostname}/home/${nuser}/update.sh
 
 #    echo "* * * * * ${nuser} sh /home/${nuser}/update.sh > /dev/null 2>&1" \
-#        >> /usr/jails/www01/etc/crontab
+#        >> /usr/jails/${www_hostname}/etc/crontab
 
 }
 
@@ -148,13 +186,17 @@ if ! [ "${nuser}" ] || ! [ "${domain}" ]; then
     show_help
 fi
 
-if [ "${apache}" ] ; then
-    install_configs
-    create_site
-    initialize_git
-    jexec ${www} service apache22 reload
+if [ "${vhost}" ] ; then
+    create_user 0
+    create_vhost
 fi
 
+if [ "${blog}" ]; then
+    create_user 0
+    create_vhost
+    create_user 1
+    create_blog
+fi
 
 #
 #
