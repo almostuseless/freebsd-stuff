@@ -1,4 +1,3 @@
-<font face="monospace, courier">
 freebsd-stuff
 =============
 
@@ -21,4 +20,3 @@ apachies.sh
       | -b  create new blog  |   www01: -user/directory/vhost/ssh keys |
       |                      |   repo01: user/ro-user/git/ssh keys     |
       +----------------------+-----------------------------------------+</pre>
-</font>
