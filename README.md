@@ -5,8 +5,8 @@ freebsd-stuff
 a collection of functional but inelegent scripts for freebsd stuff
 
 
-0x00 - apachies.sh
-------------------
+apachies.sh
+-----------
 <pre>[root@demeter /usr/local/src/freebsd-stuff]# ./apachies.sh 
 
 
