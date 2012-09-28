@@ -6,10 +6,6 @@ repo_hostname="repo01"
 www_jid=`jls | grep ${www_hostname} | awk '{ print $1 }'`
 repo_jid=`jls | grep ${repo_hostname} | awk '{ print $1 }'`
 
-echo; echo;
-echo -e "[+]  ${www_hostname}\t\t- jid: ${www_jid}"
-echo -e "[+]  ${repo_hostname}\t\t- jid: ${www_jid}"
-echo "-----------------------------------------------"
 
 while getopts "bvn:d:" optname; do
     case "$optname" in
@@ -196,6 +192,11 @@ if ! [ "${blog}" ] && ! [ "${vhost}" ]; then
     show_help
     exit
 fi
+
+echo; echo;
+echo -e "[+]  ${www_hostname}\t\t- jid: ${www_jid}"
+echo -e "[+]  ${repo_hostname}\t\t- jid: ${www_jid}"
+echo "-----------------------------------------------"
 
 if [ "${vhost}" ] ; then
     if ! grep --quiet c${nuser} /usr/jails/${www_hostname}/etc/passwd; then
