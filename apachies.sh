@@ -28,7 +28,7 @@ show_help() {
             echo "      | -d  domain name for vhosts |" 
             echo "      +----------------------------+"
             echo
-            echo "      +--- functionality ----|---- creates ----------------------------+-"
+            echo "      +--- functionality ----|---- creates ----------------------------+"
             echo "      | -v  create new vhost |   www01: user/directory/vhost           |"
             echo "      +----------------------+-----------------------------------------+"
             echo "      | -b  create new blog  |   www01: -user/directory/vhost/ssh keys |"
