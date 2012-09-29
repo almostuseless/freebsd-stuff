@@ -28,12 +28,12 @@ show_help() {
             echo "      | -d  domain name for vhosts |" 
             echo "      +----------------------------+"
             echo
-            echo "      +--- functionality ----|---- creates ----------------------------+-"
-            echo "      | -v  create new vhost |   www01: user/directory/vhost           |"
-            echo "      +----------------------+-----------------------------------------+"
-            echo "      | -b  create new blog  |   www01: -user/directory/vhost/ssh keys |"
-            echo "      |                      |   repo01: user/ro-user/git/ssh keys     |"
-            echo "      +----------------------+-----------------------------------------+" 
+            echo "      +--- functionality ----|---- creates ---------------------------+"
+            echo "      | -v  create new vhost |   www01: user/directory/vhost          |"
+            echo "      +----------------------+----------------------------------------+"
+            echo "      | -b  create new blog  |   www01: user/directory/vhost/ssh keys |"
+            echo "      |                      |  repo01: user/ro-user/git/ssh keys     |"
+            echo "      +----------------------+----------------------------------------+" 
             echo; echo
             exit
 }
@@ -84,9 +84,14 @@ create_user() {
            jexec ${www_jid} chown -R ${nuser}:${nuser} /home/${nuser}/.ssh
            jexec ${www_jid} chmod -R 600 /home/${nuser}/.ssh
 
-            ### Copy public key for <user>-ro to repo01
+            ### Copy public key for www01:<user>-ro to repo01
             cat /usr/jails/${www_hostname}/usr/home/${nuser}/.ssh/id_rsa.pub \
+                > /usr/jails/${repo_hostname}/usr/home/${nuser}/.ssh/authorized_keys
+
+            ### Add repo01 
+            cat /usr/jails/${repo_hostname}/usr/home/${nuser}/.ssh/id_rsa.pub \
                 >> /usr/jails/${repo_hostname}/usr/home/${nuser}/.ssh/authorized_keys
+
 
             ### Let read-only user read .ssh/authorized_keys
               # For some reason the files/dirs are unreadable at 640.. :-/
@@ -110,7 +115,7 @@ create_vhost() {
     echo -e "[*]  ${www_hostname}\t\t- creating extra/vhosts/${domain}-vhost.conf"
 
     jexec ${www_jid} mkdir /home/${nuser}/public_html
-    jexec ${www_jid} touch /home/${nuser}/public_html/index.html 
+    echo "-- ${domain} --" > /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/index.html
     jexec ${www_jid} chmod -R 755 /home/${nuser}/public_html
 
     cp /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/blank.vhost \
@@ -122,6 +127,7 @@ create_vhost() {
     jexec ${www_jid} sed -i "" "s/__URL__/${domain}/g" \
          /usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf 
 
+    jexec ${www_jid} /usr/local/etc/rc.d/apache22 reload > /dev/null 2>&1
 }
 
 install_configs() {
@@ -149,9 +155,10 @@ install_configs() {
         jexec ${repo_jid} /etc/rc.d/sshd restart > /dev/null
     fi
 
-#    jexec ${www_jid} /usr/local/etc/rc.d/apache22 reload
 
-    echo "10.0.0.3          ${repo_hostname}" > /usr/jails/${www_hostname}/etc/hosts
+    if ! grep --quiet ${repo_hostname} /usr/jails/${www_hostname}/etc/hosts; then
+        echo "10.0.0.3          ${repo_hostname}" > /usr/jails/${www_hostname}/etc/hosts
+    fi
 }
 
 create_blog() {
@@ -160,14 +167,15 @@ create_blog() {
 
     jexec ${www_jid} rm -rf /home/${nuser}/public_html
 
-    jexec ${repo_jid} git init --shared=0640 /home/${nuser}/${domain} > /dev/null
+    jexec ${repo_jid} git init --shared=0740 --bare /home/${nuser}/${domain} > /dev/null
     jexec ${repo_jid} chown -R ${nuser}:${nuser} /home/${nuser}/${domain}
 
     echo -e "[*]  ${www_hostname}\t\t- cloning into ${repo_hostname}:/home/${nuser}/${domain}.git"
     jexec ${www_jid} pw usermod ${nuser} -s /bin/sh
-    jexec ${www_jid} su ${nuser} -c "cd && git clone ${repo_hostname}:/home/${nuser}/${domain} public_html > /dev/null"
+    jexec ${www_jid} su ${nuser} -c "cd && git clone ${repo_hostname}:/home/${nuser}/${domain} public_html > /dev/null 2>&1"
     jexec ${www_jid} pw usermod ${nuser} -s /sbin/nologin
 
+    echo "-- ${domain} --" > /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/index.html
 
     ### Script will be run from a cronjob, probably will add more stuffs later.
     ### Its in its own shell script because im too dumb to make cron work the right way
@@ -180,6 +188,24 @@ create_blog() {
 
 #    echo "* * * * * ${nuser} sh /home/${nuser}/update.sh > /dev/null 2>&1" \
 #        >> /usr/jails/${www_hostname}/etc/crontab
+
+    ### Copy public key for repo01:<user> to docroot
+    cat /usr/jails/${repo_hostname}/usr/home/${nuser}/.ssh/id_rsa \
+         >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/id_rsa_${domain}
+
+    echo "Host ${domain}" > /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
+    echo -e "\tUser ${nuser}" >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
+    echo -e "\tPort 22003" >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
+    echo -e "\tIdentityFile ~/.ssh/id_rsa_${domain}" >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
+
+    jexec ${www_jid} chown -R ${nuser}:${nuser} /home/${nuser}/public_html
+    jexec ${www_jid} chmod -R 755 /home/${nuser}/public_html
+
+    echo "[+]  -- done --"
+    echo "[!]  fetch ~/.ssh/id_rsa - http://${domain}/id_rsa_${domain}"
+    echo "[!]  fetch ~/.ssh/config - http://${domain}/ssh-config"
+
+    echo; echo;
 
 }
 
@@ -195,39 +221,39 @@ fi
 
 echo; echo;
 echo -e "[+]  ${www_hostname}\t\t- jid: ${www_jid}"
-echo -e "[+]  ${repo_hostname}\t\t- jid: ${www_jid}"
-echo "-----------------------------------------------"
+echo -e "[+]  ${repo_hostname}\t\t- jid: ${repo_jid}"
+echo "------------------ vhost ----------------------"
 
 if [ "${vhost}" ] ; then
     if ! grep --quiet c${nuser} /usr/jails/${www_hostname}/etc/passwd; then
         create_user 0
     else
-        echo "[-] ${www_hostname}\t\t- user ${nuser} exists"; echo; echo;
+        echo -e "[!] ${www_hostname}\t\t- user ${nuser} exists"
         exit
     fi
-    if ! [ -e /usr/jails/${www_jid}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
+    if ! [ -e /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
         create_vhost
     else
-        echo "[-] ${www_hostname}\t\t- vhost ${domain} exists"; echo; echo;
+        echo -e "[-] ${www_hostname}\t\t- vhost ${domain} exists"; echo; echo;
         exit
     fi
 fi
 
 if [ "${blog}" ]; then
 
-    if ! grep --quiet c${nuser} /usr/jails/${www_hostname}/etc/passwd; then
+    if ! grep --quiet ${nuser} /usr/jails/${www_hostname}/etc/passwd; then
         create_user 0
     else
-        echo "[*] ${www_hostname}\t\t- user ${nuser} exists... skipping"; echo; echo;
-        exit
+        echo -e "[!]  ${www_hostname}\t\t- user ${nuser} exists... skipping"
     fi
-    if ! [ -e /usr/jails/${www_jid}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
+    
+    if ! [ -e /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
         create_vhost
     else
-        echo "[*] ${www_hostname}\t\t- vhost ${domain} exists... skipping"; echo; echo;
-        exit
+        echo -e "[*]  ${www_hostname}\t\t- vhost ${domain} exists... skipping"
     fi
 
+    echo "---------------- repo sync --------------------"
     if ! [ -e /usr/jails/${repo_jid}/home/${nuser} ]; then
         create_user 1
     else
