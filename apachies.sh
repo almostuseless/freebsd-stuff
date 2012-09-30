@@ -29,7 +29,6 @@ show_help() {
             echo "      | -d  domain name for vhosts |" 
             echo "      +----------------------------+"
             echo
-<<<<<<< HEAD
             echo "      +--- functionality ----|---- creates/destroys------------+"
             echo "      | -v  create new vhost |  www01:  user, home dir, vhost  |"
             echo "      | -b  create new blog  |  www01:  git, ssh keys          |"
@@ -37,14 +36,6 @@ show_help() {
             echo "      +----------------------+---------------------------------+" 
             echo "      | -d  delete [-b|-v]   |  users, user-ro, homes, vhost   |"
             echo "      +----------------------+---------------------------------+" 
-=======
-            echo "      +--- functionality ----|---- creates ----------------------------+"
-            echo "      | -v  create new vhost |   www01: user/directory/vhost           |"
-            echo "      +----------------------+-----------------------------------------+"
-            echo "      | -b  create new blog  |   www01: -user/directory/vhost/ssh keys |"
-            echo "      |                      |   repo01: user/ro-user/git/ssh keys     |"
-            echo "      +----------------------+-----------------------------------------+" 
->>>>>>> d754db6381a8a1edc3286f1b16d94cfdc744afdc
             echo; echo
             exit
 }
