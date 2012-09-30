@@ -7,12 +7,13 @@ www_jid=`jls | grep ${www_hostname} | awk '{ print $1 }'`
 repo_jid=`jls | grep ${repo_hostname} | awk '{ print $1 }'`
 
 
-while getopts "bvn:d:" optname; do
+while getopts "bDvn:d:" optname; do
     case "$optname" in
-        v ) vhost=1 ;;
-        b ) blog=1 ;;
-        n ) nuser=$OPTARG ;;
-        d ) domain=$OPTARG ;;
+        v ) vhost=1          ;;
+        b ) blog=1 ; vhost=1 ;;
+        D ) delete=1         ;;
+        n ) nuser=$OPTARG    ;;
+        d ) domain=$OPTARG   ;;
         ? ) echo "-- Unknown option $OPTARG --"
         ;;
     esac
@@ -28,12 +29,13 @@ show_help() {
             echo "      | -d  domain name for vhosts |" 
             echo "      +----------------------------+"
             echo
-            echo "      +--- functionality ----|---- creates ---------------------------+"
-            echo "      | -v  create new vhost |   www01: user/directory/vhost          |"
-            echo "      +----------------------+----------------------------------------+"
-            echo "      | -b  create new blog  |   www01: user/directory/vhost/ssh keys |"
-            echo "      |                      |  repo01: user/ro-user/git/ssh keys     |"
-            echo "      +----------------------+----------------------------------------+" 
+            echo "      +--- functionality ----|---- creates/destroys------------+"
+            echo "      | -v  create new vhost |  www01:  user, home dir, vhost  |"
+            echo "      | -b  create new blog  |  www01:  git, ssh keys          |"
+            echo "      |                      |  repo01: user, ro-user, home    |"
+            echo "      +----------------------+---------------------------------+" 
+            echo "      | -d  delete [-b|-v]   |  users, user-ro, homes, vhost   |"
+            echo "      +----------------------+---------------------------------+" 
             echo; echo
             exit
 }
@@ -209,51 +211,66 @@ create_blog() {
 
 }
 
+### probably the most retarded way i could possibly validate arguments
+
 if ! [ "${nuser}" ] || ! [ "${domain}" ]; then
     show_help
-    exit
 fi
 
 if ! [ "${blog}" ] && ! [ "${vhost}" ]; then
     show_help
-    exit
 fi
+
 
 echo; echo;
 echo -e "[+]  ${www_hostname}\t\t- jid: ${www_jid}"
 echo -e "[+]  ${repo_hostname}\t\t- jid: ${repo_jid}"
 echo "------------------ vhost ----------------------"
 
+echo "DELETE: ${delete}"
+
+### continued
 if [ "${vhost}" ] ; then
-    if ! grep --quiet c${nuser} /usr/jails/${www_hostname}/etc/passwd; then
-        create_user 0
+
+    # if -d, rm shit and bail
+    if [ "${delete}" ]; then
+        echo -e "[!]  ${www_hostname}\t\t- cleaning up"
+        jexec ${www_jid} pw userdel ${nuser}
+        jexec ${www_jid} rm -rf /home/${nuser}
+        jexec ${www_jid} rm /usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf
+        jexec ${www_jid} /usr/local/etc/rc.d/apache22 reload > /dev/null 2>&1
+        echo -e "[!]  ${www_hostname}\t\t- deleted ( user: ${nuser} - vhost: ${domain} )"
     else
-        echo -e "[!] ${www_hostname}\t\t- user ${nuser} exists"
-        exit
-    fi
-    if ! [ -e /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
-        create_vhost
-    else
-        echo -e "[-] ${www_hostname}\t\t- vhost ${domain} exists"; echo; echo;
-        exit
+        if ! grep --quiet c${nuser} /usr/jails/${www_hostname}/etc/passwd; then
+            create_user 0
+        else
+            echo -e "[!] ${www_hostname}\t\t- user ${nuser} exists... skipping"
+        fi
+        if ! [ -e /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
+            create_vhost
+        else
+            echo -e "[-] ${www_hostname}\t\t- vhost ${domain} exists... skipping"; 
+        fi
     fi
 fi
 
 if [ "${blog}" ]; then
 
-    if ! grep --quiet ${nuser} /usr/jails/${www_hostname}/etc/passwd; then
-        create_user 0
-    else
-        echo -e "[!]  ${www_hostname}\t\t- user ${nuser} exists... skipping"
-    fi
-    
-    if ! [ -e /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
-        create_vhost
-    else
-        echo -e "[*]  ${www_hostname}\t\t- vhost ${domain} exists... skipping"
+    echo "--------------- repository --------------------"
+
+    # if -d, rm shit and bail
+    if [ "${delete}" ]; then
+        echo -e "[!]  ${repo_hostname}\t\t- cleaning up"
+        jexec ${repo_jid} pw userdel ${nuser}
+        jexec ${repo_jid} pw userdel ${nuser}-ro
+        jexec ${repo_jid} pw groupdel ${nuser}
+        jexec ${repo_jid} rm -rf /home/${nuser}
+
+        echo -e "[!]  ${repo_hostname}\t\t- deleted ( user: ${nuser} - repository: ${domain} )"
+        echo; echo; 
+        exit
     fi
 
-    echo "---------------- repo sync --------------------"
     if ! [ -e /usr/jails/${repo_jid}/home/${nuser} ]; then
         create_user 1
     else
