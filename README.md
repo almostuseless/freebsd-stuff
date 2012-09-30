@@ -1,4 +1,3 @@
-<font face="monospace, courier">
 freebsd-stuff
 =============
 
@@ -7,7 +6,7 @@ a collection of functional but inelegent scripts for freebsd stuff
 
 0x00 - apachies.sh
 ------------------
-<pre>[root@demeter /usr/local/src/freebsd-stuff]# ./apachies.sh 
+<pre># ./apachies.sh 
 
 
       +--- required flags ---------+
@@ -15,10 +14,10 @@ a collection of functional but inelegent scripts for freebsd stuff
       | -d  domain name for vhosts |
       +----------------------------+
 
-      +--- functionality ----|---- creates ----------------------------+
-      | -v  create new vhost |   www01: user/directory/vhost           |
-      +----------------------+-----------------------------------------+
-      | -b  create new blog  |   www01: -user/directory/vhost/ssh keys |
-      |                      |   repo01: user/ro-user/git/ssh keys     |
-      +----------------------+-----------------------------------------+</pre>
-</font>
+      +--- functionality ----|---- creates/destroys------------+
+      | -v  create new vhost |  www01:  user, home dir, vhost  |
+      | -b  create new blog  |  www01:  git, ssh keys          |
+      |                      |  repo01: user, ro-user, home    |
+      +----------------------+---------------------------------+
+      | -d  delete [-b|-v]   |  users, user-ro, homes, vhost   |
+      +----------------------+---------------------------------+</pre>
