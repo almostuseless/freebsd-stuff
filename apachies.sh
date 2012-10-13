@@ -34,7 +34,7 @@ show_help() {
             echo "      | -b  create new blog  |  www01:  git, ssh keys          |"
             echo "      |                      |  repo01: user, ro-user, home    |"
             echo "      +----------------------+---------------------------------+" 
-            echo "      | -d  delete [-b|-v]   |  users, user-ro, homes, vhost   |"
+            echo "      | -D  delete [-b|-v]   |  users, user-ro, homes, vhost   |"
             echo "      +----------------------+---------------------------------+" 
             echo; echo
             exit
@@ -51,16 +51,25 @@ create_user() {
 
 
         if [ "${utype}" -eq "0" ]; then
+
             echo -e "[*]  ${www_hostname}\t\t- creating user ${nuser}"
 
-            jexec ${www_jid} pw groupadd ${nuser}
-            jexec ${www_jid} pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 700 -s /sbin/nologin
+            if ! grep --quiet ${nuser} /usr/jails/${www_hostname}/etc/passwd; then
+                jexec ${www_jid} pw groupadd ${nuser}
+                jexec ${www_jid} pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 700 -s /sbin/nologin
+            else
+                echo -e "[!] ${www_hostname}\t\t- user ${nuser} exists... skipping"
+            fi
 
         elif [ "${utype}" -eq "1" ]; then
             echo -e "[*]  ${repo_hostname}\t\t- creating user ${nuser}"
 
-            jexec ${repo_jid} pw groupadd ${nuser}
-            jexec ${repo_jid} pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 770 -s /usr/local/bin/git-shell
+            if ! grep --quiet ${nuser} /usr/jails/${repo_hostname}/etc/passwd; then
+                jexec ${repo_jid} pw groupadd ${nuser}
+                jexec ${repo_jid} pw useradd -n ${nuser} -d /home/${nuser} -g ${nuser} -m -M 770 -s /usr/local/bin/git-shell
+            else
+                echo -e "[!] ${repo_hostname}\t\t- user ${nuser} exists... skipping"
+            fi
 
             echo -e "[*]  ${www_hostname}/${repo_hostname}:\t- generating ssh keys"
 
@@ -116,9 +125,9 @@ create_vhost() {
 
     echo -e "[*]  ${www_hostname}\t\t- creating extra/vhosts/${domain}-vhost.conf"
 
-    jexec ${www_jid} mkdir /home/${nuser}/public_html
-    echo "-- ${domain} --" > /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/index.html
-    jexec ${www_jid} chmod -R 755 /home/${nuser}/public_html
+    jexec ${www_jid} mkdir -p /home/${nuser}/${domain}/public_html
+    echo "-- ${domain} --" > /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/index.html
+    jexec ${www_jid} chmod -R 755 /home/${nuser}/${domain}/public_html
 
     cp /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/blank.vhost \
         /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf
@@ -163,21 +172,16 @@ install_configs() {
     fi
 }
 
-create_blog() {
+create_blog(){
 
-    echo -e "[*]  ${repo_hostname}\t\t- creating new git repo at /home/${nuser}/${domain}.git"
-
-    jexec ${www_jid} rm -rf /home/${nuser}/public_html
+    echo -e "[*]  ${repo_hostname}\t\t- creating new git repo at ~/${domain}"
 
     jexec ${repo_jid} git init --shared=0740 --bare /home/${nuser}/${domain} > /dev/null
     jexec ${repo_jid} chown -R ${nuser}:${nuser} /home/${nuser}/${domain}
 
-    echo -e "[*]  ${www_hostname}\t\t- cloning into ${repo_hostname}:/home/${nuser}/${domain}.git"
-    jexec ${www_jid} pw usermod ${nuser} -s /bin/sh
-    jexec ${www_jid} su ${nuser} -c "cd && git clone ${repo_hostname}:/home/${nuser}/${domain} public_html > /dev/null 2>&1"
-    jexec ${www_jid} pw usermod ${nuser} -s /sbin/nologin
 
-    echo "-- ${domain} --" > /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/index.html
+
+    echo "-- ${domain} --" > /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/index.html
 
     ### Script will be run from a cronjob, probably will add more stuffs later.
     ### Its in its own shell script because im too dumb to make cron work the right way
@@ -193,19 +197,39 @@ create_blog() {
 
     ### Copy public key for repo01:<user> to docroot
     cat /usr/jails/${repo_hostname}/usr/home/${nuser}/.ssh/id_rsa \
-         >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/id_rsa_${domain}
+         >> /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/id_rsa_${domain}
 
-    echo "Host ${domain}" > /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
-    echo -e "\tUser ${nuser}" >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
-    echo -e "\tPort 22003" >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
-    echo -e "\tIdentityFile ~/.ssh/id_rsa_${domain}" >> /usr/jails/${www_hostname}/usr/home/${nuser}/public_html/ssh-config
+    echo "Host ${domain}" > /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/config_${domain}
+    echo -e "\tUser ${nuser}" >> /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/config_${domain}
+    echo -e "\tPort 22003" >> /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/config_${domain}
+    echo -e "\tIdentityFile ~/.ssh/id_rsa_${domain}" >> /usr/jails/${www_hostname}/usr/home/${nuser}/${domain}/public_html/config_${domain}
 
-    jexec ${www_jid} chown -R ${nuser}:${nuser} /home/${nuser}/public_html
-    jexec ${www_jid} chmod -R 755 /home/${nuser}/public_html
+    jexec ${www_jid} service apache22 reload > /dev/null 2>&1
 
-    echo "[+]  -- done --"
-    echo "[!]  fetch ~/.ssh/id_rsa - http://${domain}/id_rsa_${domain}"
-    echo "[!]  fetch ~/.ssh/config - http://${domain}/ssh-config"
+    echo    "------------- fetch credentials ---------------"
+    echo -e "[!]  http://${domain}/id_rsa_${domain}  - create ~/.ssh/id_rsa_${domain}"
+    echo -e "[!]  http://${domain}/config_${domain}  - create/append ~/.ssh/config\n"
+    echo -e "[!]  Press enter once you have completed 0x06 on your local machine"
+    echo -e "[!]  (from http://almostuseless.info/2012/10/10/blogging-with-freebsd-and-jekyll)"
+    read yep
+
+    jexec ${www_jid} rm -rf /home/${nuser}/${domain}
+
+    echo -e "[*]  ${www_hostname}\t\t- checking out _site from ${repo_hostname}:/home/${nuser}/${domain}"
+    jexec ${www_jid} pw usermod ${nuser} -s /bin/sh
+
+    jexec ${www_jid} su ${nuser} -c "cd && git clone -n ${repo_hostname}:/home/${nuser}/${domain} ${domain} --depth 1 > /dev/null 2>&1"
+    jexec ${www_jid} su ${nuser} -c "cd ~/${domain} && git checkout HEAD _site"
+
+    jexec ${www_jid} pw usermod ${nuser} -s /sbin/nologin
+
+    jexec ${www_jid} sed -i "" 's/public_html/_site/g' /usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf
+    jexec ${www_jid} service apache22 reload > /dev/null 2>&1
+
+    jexec ${www_jid} chown -R ${nuser}:${nuser} /home/${nuser}/${domain}
+    jexec ${www_jid} chmod -R 755 /home/${nuser}/${domain}
+
+    echo "[+]  done"
 
     echo; echo;
 
@@ -227,7 +251,6 @@ echo -e "[+]  ${www_hostname}\t\t- jid: ${www_jid}"
 echo -e "[+]  ${repo_hostname}\t\t- jid: ${repo_jid}"
 echo "------------------ vhost ----------------------"
 
-echo "DELETE: ${delete}"
 
 ### continued
 if [ "${vhost}" ] ; then
@@ -241,11 +264,8 @@ if [ "${vhost}" ] ; then
         jexec ${www_jid} /usr/local/etc/rc.d/apache22 reload > /dev/null 2>&1
         echo -e "[!]  ${www_hostname}\t\t- deleted ( user: ${nuser} - vhost: ${domain} )"
     else
-        if ! grep --quiet c${nuser} /usr/jails/${www_hostname}/etc/passwd; then
-            create_user 0
-        else
-            echo -e "[!] ${www_hostname}\t\t- user ${nuser} exists... skipping"
-        fi
+        create_user 0
+
         if ! [ -e /usr/jails/${www_hostname}/usr/local/etc/apache22/extra/vhosts/${domain}-vhost.conf ]; then
             create_vhost
         else

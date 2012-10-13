@@ -21,4 +21,25 @@ apachies.sh
       +----------------------+---------------------------------+
       | -d  delete [-b|-v]   |  users, user-ro, homes, vhost   |
       +----------------------+---------------------------------+
-</pre>
+
+
+# ./apachies.sh -n example -d por-ejemplo.com -b 
+
+[+]  www01              - jid: 16
+[+]  repo01             - jid: 12
+------------------ vhost ----------------------
+[*]  www01              - creating user example
+[*]  www01              - creating extra/vhosts/por-ejemplo.com-vhost.conf
+--------------- repository --------------------
+[*]  repo01             - creating user example
+[*]  www01/repo01:      - generating ssh keys
+[*]  repo01             - creating user example-ro
+[*]  repo01             - creating new git repo at ~/por-ejemplo.com
+------------- fetch credentials ---------------
+[!]  http://por-ejemplo.com/id_rsa_por-ejemplo.com  - create ~/.ssh/id_rsa_por-ejemplo.com
+[!]  http://por-ejemplo.com/config_por-ejemplo.com  - create/append ~/.ssh/config
+
+[!]  Press enter once you have completed 0x06 on your local machine
+[!]  (from http://almostuseless.info/2012/10/10/blogging-with-freebsd-and-jekyll)
+[*]  www01              - checking out _site from repo01:/home/example/por-ejemplo.com
+[+]  done</pre>
